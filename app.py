@@ -1,3 +1,4 @@
+# app.py
 import os
 import logging
 import asyncio
@@ -7,56 +8,49 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     ContextTypes,
-    filters
+    filters,
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DELETE_DELAY = 5  # ثانیه تا پیام ربات حذف شود
+# --- Handlers ---
 
-# /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a welcome message and auto-delete it after 5 seconds."""
     msg = await update.message.reply_text(
-        "سلام! 👋 من یک ربات پاک‌کننده هستم.\nپیام‌های من بعد از چند ثانیه حذف می‌شوند 🤖"
+        "سلام! 👋 من یک بات ساده هستم.\nپیام‌ها بعد از چند ثانیه پاک می‌شوند 🤖"
     )
-    await asyncio.sleep(DELETE_DELAY)
+    await asyncio.sleep(5)
     await msg.delete()
 
-# echo handler
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Echo the user message and delete the bot reply after 5 seconds."""
     if update.message and update.message.text:
         msg = await update.message.reply_text(update.message.text)
-        await asyncio.sleep(DELETE_DELAY)
+        await asyncio.sleep(5)
         await msg.delete()
 
-async def main() -> None:
+# --- Main ---
+
+if __name__ == "__main__":
     TOKEN = os.getenv("TELEGRAM_TOKEN")
-    if not TOKEN:
-        raise RuntimeError("Env var TELEGRAM_TOKEN تنظیم نشده است.")
-
     PUBLIC_URL = os.getenv("PUBLIC_URL")
-    if not PUBLIC_URL:
-        raise RuntimeError("Env var PUBLIC_URL تنظیم نشده است.")
-
     WEBHOOK_PATH = os.getenv("WEBHOOK_SECRET", "super-secret-path")
     PORT = int(os.getenv("PORT", "8000"))
+
+    if not TOKEN or not PUBLIC_URL:
+        raise RuntimeError("Env vars TELEGRAM_TOKEN و PUBLIC_URL باید تنظیم شوند!")
 
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    # فقط این خط، loop را خود PTB مدیریت می‌کند
-    await app.run_webhook(
+    # PTB خودش loop را مدیریت می‌کند، نیازی به nest_asyncio نیست
+    app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
         url_path=WEBHOOK_PATH,
         webhook_url=f"{PUBLIC_URL}/{WEBHOOK_PATH}",
         drop_pending_updates=True,
     )
-
-# ⚡️ تغییر اصلی: asyncio.run() حذف شد
-if __name__ == "__main__":
-    import nest_asyncio
-    nest_asyncio.apply()  # برای Render / Jupyter محیطی که loop از قبل فعال است
-    asyncio.get_event_loop().run_until_complete(main())
