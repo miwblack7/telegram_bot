@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -12,16 +13,24 @@ from telegram.ext import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+DELETE_DELAY = 5  # ثانیه تا پیام ربات حذف شود
+
 # /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "سلام! 👋 من یک بات ساده هستم.\nهرچی بفرستی، همونو برمی‌گردونم 🤖"
+    msg = await update.message.reply_text(
+        "سلام! 👋 من یک ربات پاک‌کننده هستم.\nپیام‌های من بعد از چند ثانیه حذف می‌شوند 🤖"
     )
+    # پاکسازی بعد از چند ثانیه
+    await asyncio.sleep(DELETE_DELAY)
+    await msg.delete()
 
 # echo handler
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message and update.message.text:
-        await update.message.reply_text(update.message.text)
+        msg = await update.message.reply_text(update.message.text)
+        # پاکسازی پیام ربات بعد از چند ثانیه
+        await asyncio.sleep(DELETE_DELAY)
+        await msg.delete()
 
 async def main() -> None:
     TOKEN = os.getenv("TELEGRAM_TOKEN")
