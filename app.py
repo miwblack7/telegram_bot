@@ -1,17 +1,37 @@
 import os
 import logging
 import asyncio
+import nest_asyncio
+from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
+# لاگ‌ها
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DELETE_DELAY = 10  # چند ثانیه بعد پیام‌ها پاک بشن
+# تاخیر پاک شدن پیام
+DELETE_DELAY = 10  
 
-# /start
+# FastAPI app
+fastapi_app = FastAPI()
+
+# گرفتن توکن و URL ها از متغیر محیطی
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+PUBLIC_URL = os.getenv("PUBLIC_URL")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super-secret-path")
+
+if not TOKEN or not PUBLIC_URL:
+    raise RuntimeError("⚠️ TELEGRAM_TOKEN و PUBLIC_URL باید ست بشن")
+
+# ساخت ربات
+application = Application.builder().token(TOKEN).build()
+
+
+# ------------------- هندلرها -------------------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = await update.message.reply_text("سلام 👋 من ربات پاکسازی هستم.\nهر پیامی بدی چند ثانیه بعد پاک میشه 🚮")
+    msg = await update.message.reply_text("سلام 👋 من ربات پاکسازی هستم. پیام‌ها بعد از چند ثانیه پاک میشن 🚮")
     await asyncio.sleep(DELETE_DELAY)
     try:
         await update.message.delete()
@@ -19,7 +39,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.warning(f"خطا در حذف پیام: {e}")
 
-# echo
+
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message and update.message.text:
         msg = await update.message.reply_text(update.message.text)
@@ -30,32 +50,39 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception as e:
             logger.warning(f"خطا در حذف پیام: {e}")
 
-async def main() -> None:
-    token = os.getenv("TELEGRAM_TOKEN")
-    if not token:
-        raise RuntimeError("⚠️ متغیر محیطی TELEGRAM_TOKEN ست نشده")
 
-    secret_path = os.getenv("WEBHOOK_SECRET", "super-secret-path")
-    public_url = os.getenv("PUBLIC_URL")
-    if not public_url:
-        raise RuntimeError("⚠️ متغیر محیطی PUBLIC_URL ست نشده")
+# ------------------- ثبت هندلرها -------------------
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    port = int(os.getenv("PORT", "8000"))
 
-    app = Application.builder().token(token).build()
+# ------------------- FastAPI routes -------------------
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+@fastapi_app.on_event("startup")
+async def on_startup():
+    """وقتی سرور بالا میاد، وبهوک ست کنه"""
+    await application.bot.set_webhook(url=f"{PUBLIC_URL}/{WEBHOOK_SECRET}")
 
-    await app.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=secret_path,
-        webhook_url=f"{public_url}/{secret_path}",
-        drop_pending_updates=True,
-    )
+
+@fastapi_app.post(f"/{WEBHOOK_SECRET}")
+async def webhook(request: Request):
+    """دریافت آپدیت‌های تلگرام و پاس دادن به PTB"""
+    data = await request.json()
+    update = Update.de_json(data, application.bot)
+    await application.update_queue.put(update)
+    return {"ok": True}
+
+
+# ------------------- اجرای main loop -------------------
 
 if __name__ == "__main__":
-    import nest_asyncio
+    import uvicorn
     nest_asyncio.apply()
-    asyncio.run(main())
+
+    # اجرای PTB توی یک تسک جدا
+    loop = asyncio.get_event_loop()
+    loop.create_task(application.initialize())
+    loop.create_task(application.start())
+
+    # اجرای FastAPI با Uvicorn
+    uvicorn.run("app:fastapi_app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
