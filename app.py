@@ -20,7 +20,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = await update.message.reply_text(
         "سلام! 👋 من یک ربات پاک‌کننده هستم.\nپیام‌های من بعد از چند ثانیه حذف می‌شوند 🤖"
     )
-    # پاکسازی بعد از چند ثانیه
     await asyncio.sleep(DELETE_DELAY)
     await msg.delete()
 
@@ -28,7 +27,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message and update.message.text:
         msg = await update.message.reply_text(update.message.text)
-        # پاکسازی پیام ربات بعد از چند ثانیه
         await asyncio.sleep(DELETE_DELAY)
         await msg.delete()
 
@@ -44,14 +42,11 @@ async def main() -> None:
     WEBHOOK_PATH = os.getenv("WEBHOOK_SECRET", "super-secret-path")
     PORT = int(os.getenv("PORT", "8000"))
 
-    # ساخت اپلیکیشن
     app = ApplicationBuilder().token(TOKEN).build()
-
-    # ثبت هندلرها
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    # اجرای webhook
+    # فقط این خط، loop را خود PTB مدیریت می‌کند
     await app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
@@ -60,6 +55,8 @@ async def main() -> None:
         drop_pending_updates=True,
     )
 
+# ⚡️ تغییر اصلی: asyncio.run() حذف شد
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    import nest_asyncio
+    nest_asyncio.apply()  # برای Render / Jupyter محیطی که loop از قبل فعال است
+    asyncio.get_event_loop().run_until_complete(main())
