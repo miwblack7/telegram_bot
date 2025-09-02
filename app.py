@@ -1,58 +1,76 @@
 import os
-import logging
 import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import nest_asyncio
+import uvicorn
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+nest_asyncio.apply()
 
-DELETE_DELAY = 5  # ثانیه‌ها قبل از حذف پیام
+# ---------- FastAPI Keep-Alive ----------
+keep_alive_app = FastAPI()
+keep_alive_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# /start command
+@keep_alive_app.get("/")
+async def ping():
+    return {"status": "alive"}
+
+# ---------- Telegram Bot Handlers ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = await update.message.reply_text(
-        "سلام! 👋 من یک بات پاک‌کننده هستم.\nهرچی بفرستی، همونو پاک می‌کنم 🤖"
-    )
-    # حذف پیام کاربر و پیام ربات بعد از DELETE_DELAY ثانیه
-    await asyncio.sleep(DELETE_DELAY)
-    try:
-        await update.message.delete()
-        await msg.delete()
-    except Exception as e:
-        logger.warning(f"خطا در حذف پیام: {e}")
+    msg = await update.message.reply_text("سلام! 👋 من یک بات پاک‌کن هستم.")
+    await asyncio.sleep(5)  # بعد 5 ثانیه پاک کن
+    await msg.delete()
+    await update.message.delete()
 
-# echo handler
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message and update.message.text:
         msg = await update.message.reply_text(update.message.text)
-        await asyncio.sleep(DELETE_DELAY)
-        try:
-            await update.message.delete()
-            await msg.delete()
-        except Exception as e:
-            logger.warning(f"خطا در حذف پیام: {e}")
+        await asyncio.sleep(5)
+        await msg.delete()
+        await update.message.delete()
 
-# دریافت تنظیمات از محیط
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-PUBLIC_URL = os.getenv("PUBLIC_URL")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super-secret-path")
-PORT = int(os.getenv("PORT", "8000"))
+# ---------- Main Function ----------
+async def main():
+    token = os.getenv("TELEGRAM_TOKEN")
+    if not token:
+        raise RuntimeError("Env var TELEGRAM_TOKEN تنظیم نشده است.")
 
-if not TOKEN or not PUBLIC_URL:
-    raise RuntimeError("Env vars TELEGRAM_TOKEN و PUBLIC_URL تنظیم نشده‌اند.")
+    secret_path = os.getenv("WEBHOOK_SECRET", "super-secret-path")
+    public_url  = os.getenv("PUBLIC_URL")
+    if not public_url:
+        raise RuntimeError("Env var PUBLIC_URL تنظیم نشده است.")
 
-# ساخت اپلیکیشن
-app = Application.builder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+    port = int(os.getenv("PORT", "8000"))
 
-# اجرای webhook بدون asyncio.run()
-if __name__ == "__main__":
-    app.run_webhook(
+    app = Application.builder().token(token).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+
+    # Run webhook
+    await app.run_webhook(
         listen="0.0.0.0",
-        port=PORT,
-        url_path=WEBHOOK_SECRET,
-        webhook_url=f"{PUBLIC_URL}/{WEBHOOK_SECRET}",
+        port=port,
+        url_path=secret_path,
+        webhook_url=f"{public_url}/{secret_path}",
         drop_pending_updates=True,
     )
+
+# ---------- Run Both FastAPI + Telegram ----------
+if __name__ == "__main__":
+    import threading
+
+    # Run FastAPI keep-alive server
+    def run_keep_alive():
+        uvicorn.run(keep_alive_app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+
+    threading.Thread(target=run_keep_alive, daemon=True).start()
+
+    # Run Telegram bot
+    asyncio.run(main())
