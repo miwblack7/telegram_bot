@@ -21,15 +21,17 @@ web_app = FastAPI()
 # متغیر سراسری برای اپلیکیشن تلگرام
 telegram_app: Application = None
 
+
 # ─────────── هندلرها ───────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = await update.message.reply_text("سلام! 👋\nهرچی بفرستی، همونو برمی‌گردونم 🤖")
-    await asyncio.sleep(5)  # بعد از ۵ ثانیه پاک کن
+    msg = await update.message.reply_text("سلام! 👋")
+    await asyncio.sleep(5)
     try:
         await update.message.delete()
         await msg.delete()
     except Exception as e:
         logger.warning(f"خطا در پاک‌کردن پیام: {e}")
+
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.text:
@@ -41,15 +43,16 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"خطا در پاک‌کردن پیام: {e}")
 
+
 # ─────────── FastAPI routes ───────────
 @web_app.get("/")
 async def root():
-    """برای UptimeRobot"""
     return {"status": "ok"}
+
 
 @web_app.post("/{secret_path}")
 async def telegram_webhook(request: Request, secret_path: str):
-    """مسیر وب‌هوک تلگرام"""
+    global telegram_app
     if secret_path != os.getenv("WEBHOOK_SECRET", "secret"):
         return {"error": "forbidden"}
 
@@ -58,19 +61,18 @@ async def telegram_webhook(request: Request, secret_path: str):
     await telegram_app.update_queue.put(update)
     return {"status": "ok"}
 
-# ─────────── main ───────────
-async def main():
+
+# ─────────── startup event ───────────
+@web_app.on_event("startup")
+async def startup_event():
     global telegram_app
 
     TOKEN = os.getenv("TELEGRAM_TOKEN")
-    if not TOKEN:
-        raise RuntimeError("⚠️ متغیر محیطی TELEGRAM_TOKEN تنظیم نشده.")
-
     PUBLIC_URL = os.getenv("PUBLIC_URL")
-    if not PUBLIC_URL:
-        raise RuntimeError("⚠️ متغیر محیطی PUBLIC_URL تنظیم نشده.")
-
     SECRET_PATH = os.getenv("WEBHOOK_SECRET", "secret")
+
+    if not TOKEN or not PUBLIC_URL:
+        raise RuntimeError("⚠️ باید TELEGRAM_TOKEN و PUBLIC_URL تنظیم شوند.")
 
     telegram_app = Application.builder().token(TOKEN).build()
 
@@ -78,15 +80,15 @@ async def main():
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    # ست‌کردن وب‌هوک
+    # وبهوک ست کن
     await telegram_app.bot.set_webhook(f"{PUBLIC_URL}/{SECRET_PATH}")
+
+    # اپ رو در بک‌گراند اجرا کن
+    asyncio.create_task(telegram_app.run_polling())  # فقط برای فعال شدن update_queue
+
 
 # ─────────── اجرا ───────────
 if __name__ == "__main__":
     import uvicorn
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-
     port = int(os.getenv("PORT", "10000"))
     uvicorn.run(web_app, host="0.0.0.0", port=port)
