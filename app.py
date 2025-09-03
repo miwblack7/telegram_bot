@@ -1,89 +1,60 @@
 import os
 import logging
-from fastapi import FastAPI, Request, Header, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-# === ENV ===
-TOKEN = os.getenv("TELEGRAM_TOKEN", "")
-PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "change-me")
+# ---- تنظیمات محیط ----
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
+PUBLIC_URL = os.getenv("PUBLIC_URL")
 
-if not TOKEN:
-    raise RuntimeError("TELEGRAM_TOKEN is missing")
-if not PUBLIC_URL:
-    raise RuntimeError("PUBLIC_URL is missing")
-
-# === Logging ===
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("bot")
+logger = logging.getLogger(__name__)
 
-# === FastAPI ===
-app = FastAPI(title="Telegram Webhook")
+# ---- ساخت اپلیکیشن FastAPI ----
+app = FastAPI()
 
-# === PTB v21 (بدون Updater) ===
-application = Application.builder().token(TOKEN).build()
+# ---- ساخت ربات ----
+bot_app = Application.builder().token(TOKEN).build()
 
-# --- Handlers ---
+# دستور ساده /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! ✅ ربات وصل شد. /help")
+    await update.message.reply_text("سلام 👋 ربات آماده‌ست!")
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("هرچی بنویسی همونو برمی‌گردونم. برای تست آماده‌ام 🙂")
+bot_app.add_handler(CommandHandler("start", start))
 
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(update.message.text)
 
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("help", help_cmd))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+# ---- رویداد lifespan (جایگزین startup/shutdown) ----
+@app.on_event("lifespan")
+async def lifespan(app: FastAPI):
+    logger.info("🔹 Bot starting...")
+    await bot_app.initialize()
+    await bot_app.start()
+    await bot_app.bot.set_webhook(
+        url=f"{PUBLIC_URL}/webhook/{WEBHOOK_SECRET}"
+    )
+    yield
+    logger.info("🔹 Bot shutting down...")
+    await bot_app.stop()
+    await bot_app.shutdown()
 
-# --- Lifecycle ---
-@app.on_event("startup")
-async def on_startup():
-    # init app
-    await application.initialize()
-    # ست کردن وبهوک (با Secret Header و پاک کردن آپدیت‌های صف)
-    webhook_url = f"{PUBLIC_URL}/webhook/{WEBHOOK_SECRET}"
-    try:
-        await application.bot.set_webhook(
-            url=webhook_url,
-            secret_token=WEBHOOK_SECRET,
-            drop_pending_updates=True,
-        )
-        log.info(f"Webhook set -> {webhook_url}")
-    except Exception as e:
-        log.exception("Failed to set webhook")
-        # ادامه می‌دهیم تا سرویس بالا بماند
 
-@app.on_event("shutdown")
-async def on_shutdown():
-    try:
-        await application.bot.delete_webhook()
-    except Exception:
-        pass
-    await application.shutdown()
-    await application.stop()
-
-# --- Health ---
+# ---- مسیر تست ----
 @app.get("/")
 async def root():
-    return {"ok": True, "msg": "running"}
+    return {"status": "ok", "message": "Bot is live 🎉"}
 
-# --- Webhook endpoint ---
-@app.post("/webhook/{secret}")
-async def telegram_webhook(
-    secret: str,
-    request: Request,
-    x_telegram_bot_api_secret_token: str | None = Header(default=None),
-):
-    # بررسی secret در مسیر و هدر امنیتی
-    if secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="invalid path secret")
-    if WEBHOOK_SECRET and x_telegram_bot_api_secret_token != WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="invalid header secret")
+
+# ---- وبهوک ----
+@app.post("/webhook/{token}")
+async def webhook(request: Request, token: str, x_telegram_bot_api_secret_token: str = Header(None)):
+    if token != WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    if x_telegram_bot_api_secret_token != WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret token")
 
     data = await request.json()
-    update = Update.de_json(data, application.bot)
-    await application.process_update(update)
+    update = Update.de_json(data, bot_app.bot)
+    await bot_app.process_update(update)
     return {"ok": True}
