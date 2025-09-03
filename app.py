@@ -1,42 +1,76 @@
 import os
-import asyncio
-from fastapi import FastAPI
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+import time
+from flask import Flask, request
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Dispatcher, CommandHandler, CallbackQueryHandler, MessageHandler, Filters
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-app = FastAPI()
-telegram_app = None  # متغیر سراسری برای ربات
+# دریافت متغیرهای محیطی
+TOKEN = os.environ['TELEGRAM_TOKEN']
+PUBLIC_URL = os.environ['PUBLIC_URL']
+WEBHOOK_SECRET = os.environ['WEBHOOK_SECRET']
 
-# هندلر ساده دستور /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! ربات شما آماده است.")
+bot = Bot(token=TOKEN)
+app = Flask(__name__)
+dispatcher = Dispatcher(bot, None, workers=0)
 
-# Lifespan Events استاندارد
-@app.on_event("startup")
-async def startup_event():
-    global telegram_app
-    telegram_app = Application.builder().token(TOKEN).build()
-    telegram_app.add_handler(CommandHandler("start", start))
-    
-    # اجرای ربات بصورت همزمان با FastAPI
-    asyncio.create_task(telegram_app.initialize())
-    asyncio.create_task(telegram_app.start())
-    print("Telegram Bot started!")
+# ذخیره پیام‌ها {chat_id: [(message_id, timestamp)]}
+messages = {}
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    if telegram_app:
-        await telegram_app.stop()
-        await telegram_app.shutdown()
-        print("Telegram Bot stopped!")
+# پاکسازی پیام‌های بالای 48 ساعت
+def cleanup_messages():
+    now = time.time()
+    for chat_id in list(messages.keys()):
+        messages[chat_id] = [(mid, ts) for mid, ts in messages[chat_id] if now - ts < 48*3600]
+        if not messages[chat_id]:
+            del messages[chat_id]
 
-# مسیر تست FastAPI
-@app.get("/")
-async def root():
-    return {"message": "FastAPI is running!"}
+# ارسال دکمه شیشه‌ای
+def send_cleanup_button(update, context=None):
+    keyboard = [[InlineKeyboardButton("پاکسازی همه", callback_data="cleanup_all")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.message.reply_text("پاکسازی پیام‌ها:", reply_markup=reply_markup)
+
+# فرمان /start
+def start(update, context):
+    update.message.reply_text("سلام! من بات پاکسازی هستم.")
+    # ذخیره پیام
+    chat_id = update.message.chat_id
+    messages.setdefault(chat_id, []).append((update.message.message_id, time.time()))
+    send_cleanup_button(update)
+
+# کلیک روی دکمه شیشه‌ای
+def button(update: Update, context):
+    query = update.callback_query
+    if query.data == "cleanup_all":
+        chat_id = query.message.chat_id
+        if chat_id in messages:
+            for mid, _ in messages[chat_id]:
+                try:
+                    bot.delete_message(chat_id=chat_id, message_id=mid)
+                except:
+                    pass
+            del messages[chat_id]
+        query.answer("تمام پیام‌ها پاک شدند!")
+
+# ذخیره پیام‌های ورودی
+def handle_message(update, context):
+    chat_id = update.message.chat_id
+    messages.setdefault(chat_id, []).append((update.message.message_id, time.time()))
+
+# تنظیمات Dispatcher
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+dispatcher.add_handler(CallbackQueryHandler(button))
+
+# مسیر وب‌هوک
+@app.route(f"/{WEBHOOK_SECRET}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    dispatcher.process_update(update)
+    cleanup_messages()
+    return "OK"
 
 if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))  # استفاده از پورت Render
-    uvicorn.run("app:app", host="0.0.0.0", port=port)
+    # ست کردن وب‌هوک روی تلگرام
+    bot.set_webhook(url=f"{PUBLIC_URL}/{WEBHOOK_SECRET}")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
