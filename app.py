@@ -1,95 +1,55 @@
 import os
-from datetime import datetime, timedelta
 from flask import Flask, request
-from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.constants import ParseMode
-from telegram.error import TelegramError
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
+from dotenv import load_dotenv
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-# تنظیمات محیطی
-PUBLIC_URL = os.environ.get("PUBLIC_URL")
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "secret123")
+# بارگذاری .env (فقط در لوکال)
+load_dotenv()
 
-# ایجاد اپ Flask
+# متغیرهای محیطی
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+PUBLIC_URL = os.getenv("PUBLIC_URL")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "secret123")
+
+# ساخت اپلیکیشن Flask
 app = Flask(__name__)
 
-# ایجاد بات
-bot = Bot(token=TELEGRAM_TOKEN)
+# ساخت بات
+application = Application.builder().token(TOKEN).build()
 
-# ذخیره موقت پیام‌ها برای پاکسازی 48 ساعت
-MESSAGES = []
-
-# ----------------------
-# مسیر تست سرور
-@app.route("/")
-def index():
-    return "Bot is running!"
-
-# ----------------------
-# webhook تلگرام
-@app.route(f"/{WEBHOOK_SECRET}", methods=["POST"])
-def telegram_webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    handle_update(update)
-    return "OK", 200
-
-# ----------------------
-# دستورات بات
+# دستور start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("💡 گزینه اول", callback_data="opt1")],
-        [InlineKeyboardButton("✨ گزینه دوم", callback_data="opt2")]
+        [InlineKeyboardButton("پاکسازی پیام‌ها (۴۸ ساعت اخیر)", callback_data="cleanup")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    msg = await update.message.reply_text("سلام! یک گزینه انتخاب کن:", reply_markup=reply_markup)
-    
-    # ذخیره پیام برای پاکسازی
-    MESSAGES.append({"chat_id": update.effective_chat.id, "message_id": msg.message_id, "date": datetime.utcnow()})
+    await update.message.reply_text("سلام 👋 یکی از گزینه‌ها رو انتخاب کن:", reply_markup=reply_markup)
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(text=f"شما {query.data} را انتخاب کردید.")
+# ثبت هندلر
+application.add_handler(CommandHandler("start", start))
 
-# ----------------------
-# پاکسازی پیام‌های قدیمی (48 ساعت)
-def cleanup_messages():
-    global MESSAGES
-    now = datetime.utcnow()
-    to_delete = [m for m in MESSAGES if now - m["date"] > timedelta(hours=48)]
-    for m in to_delete:
-        try:
-            bot.delete_message(chat_id=m["chat_id"], message_id=m["message_id"])
-        except TelegramError:
-            pass
-    MESSAGES = [m for m in MESSAGES if now - m["date"] <= timedelta(hours=48)]
+# روت برای webhook
+@app.post(f"/{WEBHOOK_SECRET}")
+async def webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, application.bot)
+    await application.process_update(update)
+    return "ok", 200
 
-# ----------------------
-# تابع اصلی مدیریت آپدیت
-def handle_update(update: Update):
-    from telegram.ext import CallbackContext
-    from asyncio import run
-    # اجرای دستور start
-    if update.message and update.message.text == "/start":
-        app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-        run(start(update, CallbackContext(app)))
-    elif update.callback_query:
-        app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-        run(button(update, CallbackContext(app)))
-    
-    # پاکسازی پیام‌های قدیمی
-    cleanup_messages()
+# health check برای Render
+@app.get("/")
+def index():
+    return {"status": "ok", "message": "Bot is running!"}
 
-# ----------------------
-# تنظیم webhook
-@app.route("/set_webhook")
-def set_webhook():
-    url = f"{PUBLIC_URL}/{WEBHOOK_SECRET}"
-    bot.delete_webhook()
-    s = bot.set_webhook(url)
-    return f"Webhook set: {s}"
+# ست کردن webhook هنگام شروع
+@app.before_request
+def before_first_request():
+    # این فانکشن فقط بار اول اجرا میشه
+    webhook_url = f"{PUBLIC_URL}/{WEBHOOK_SECRET}"
+    app.logger.info(f"Setting webhook to: {webhook_url}")
+    application.bot.set_webhook(url=webhook_url)
 
-# ----------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    port = int(os.getenv("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
