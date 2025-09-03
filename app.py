@@ -1,50 +1,49 @@
 import os
 import asyncio
-from flask import Flask, request, abort
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler
+from flask import Flask, request
+from telegram import Bot, Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-# ENV vars
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-PUBLIC_URL = os.getenv("PUBLIC_URL")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "secret")
+# ====== تنظیمات ======
+TOKEN = os.getenv("BOT_TOKEN")
+bot = Bot(TOKEN)
 
-# Flask app
+# اپ Flask
 app = Flask(__name__)
 
-# --- Telegram Application ---
-# updater=False باعث میشه اصلا Updater ساخته نشه
-application = Application.builder().token(TOKEN).updater(None).build()
+# اپلیکیشن تلگرام
+application = Application.builder().token(TOKEN).build()
 
-# --- Handlers ---
+
+# ====== هندلرها ======
 async def start(update: Update, context):
-    await update.message.reply_text("✅ ربات به وبهوک وصل شد و درست کار می‌کنه!")
+    await update.message.reply_text("سلام! ربات فعاله ✅")
+
+
+async def echo(update: Update, context):
+    await update.message.reply_text(update.message.text)
+
 
 application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-# --- Flask Routes ---
-@app.route(f"/{WEBHOOK_SECRET}", methods=["POST"])
-async def webhook():
-    if request.method == "POST":
-        data = request.get_json(force=True)
-        update = Update.de_json(data, application.bot)
-        await application.process_update(update)
-        return "ok", 200
-    else:
-        abort(405)
 
-@app.route("/", methods=["GET"])
-def home():
-    return "ربات فعال است ✅"
+# ====== Webhook ======
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    application.update_queue.put_nowait(update)
+    return "ok", 200
 
-# --- Run ---
+
+async def set_webhook():
+    public_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/webhook"
+    print(f"Setting webhook to {public_url}")
+    await bot.delete_webhook()
+    await bot.set_webhook(url=public_url)
+
+
+# ====== اجرای سرور ======
 if __name__ == "__main__":
-    bot = Bot(TOKEN)
-    url = f"{PUBLIC_URL}/{WEBHOOK_SECRET}"
-
-    async def set_webhook():
-        await bot.delete_webhook()
-        await bot.set_webhook(url)
-
     asyncio.run(set_webhook())
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
