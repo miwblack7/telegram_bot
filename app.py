@@ -1,9 +1,10 @@
 import os
+import asyncio
 from flask import Flask, request, abort
-from telegram import Update
+from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler
 
-# Load env vars
+# ENV vars
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 PUBLIC_URL = os.getenv("PUBLIC_URL")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "secret")
@@ -11,16 +12,17 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "secret")
 # Flask app
 app = Flask(__name__)
 
-# Telegram app
-application = Application.builder().token(TOKEN).build()
+# --- Telegram Application ---
+# updater=False باعث میشه اصلا Updater ساخته نشه
+application = Application.builder().token(TOKEN).updater(None).build()
 
 # --- Handlers ---
 async def start(update: Update, context):
-    await update.message.reply_text("سلام! ربات با موفقیت به وبهوک وصل شد ✅")
+    await update.message.reply_text("✅ ربات به وبهوک وصل شد و درست کار می‌کنه!")
 
 application.add_handler(CommandHandler("start", start))
 
-# --- Flask routes ---
+# --- Flask Routes ---
 @app.route(f"/{WEBHOOK_SECRET}", methods=["POST"])
 async def webhook():
     if request.method == "POST":
@@ -35,12 +37,8 @@ async def webhook():
 def home():
     return "ربات فعال است ✅"
 
-# --- Run app ---
+# --- Run ---
 if __name__ == "__main__":
-    import asyncio
-    from telegram import Bot
-
-    # Set webhook at startup
     bot = Bot(TOKEN)
     url = f"{PUBLIC_URL}/{WEBHOOK_SECRET}"
 
