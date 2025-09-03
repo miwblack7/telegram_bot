@@ -2,8 +2,11 @@ services:
   - type: web
     name: telegram-bot
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python app.py"
+    plan: free
     envVars:
-      - key: BOT_TOKEN
-        sync: false   # مقدار رو بعداً توی داشبورد Render می‌ذاری
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
