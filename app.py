@@ -1,30 +1,32 @@
 # app.py
 import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-
 import os
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # بهتر است توکن را از محیط بگیرید
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-web_app = FastAPI(title="Telegram + FastAPI Bot Example")
-
-# تابع ساده برای پاسخ به دستور /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! ربات با موفقیت اجرا شد.")
-
-# Lifespan event برای startup و shutdown
-@web_app.on_event("startup")
-async def startup_event():
-    # ساخت اپلیکیشن تلگرام
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # اجرای کد هنگام startup
     telegram_app = Application.builder().token(TOKEN).build()
+    telegram_app.add_handler(CommandHandler("start", lambda update, context: update.message.reply_text("سلام! ربات اجرا شد.")))
     
-    # اضافه کردن هندلر
-    telegram_app.add_handler(CommandHandler("start", start))
+    # اجرای تلگرام در پس‌زمینه
+    task = asyncio.create_task(telegram_app.run_polling())
     
-    # اجرای اپلیکیشن تلگرام در پس‌زمینه
-    asyncio.create_task(telegram_app.run_polling())
+    yield  # اینجا اپلیکیشن FastAPI بالا می‌آید
+    
+    # shutdown: توقف ربات هنگام خاموشی
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+web_app = FastAPI(title="Telegram + FastAPI Bot Example", lifespan=lifespan)
 
 @web_app.get("/")
 async def root():
