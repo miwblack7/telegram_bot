@@ -1,4 +1,4 @@
 python-telegram-bot[webhooks]==20.8
-fastapi
-uvicorn
-nest_asyncio
+fastapi==0.116.1
+uvicorn==0.35.0
+
