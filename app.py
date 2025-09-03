@@ -1,70 +1,92 @@
 import os
 import logging
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-from fastapi import FastAPI
-import nest_asyncio
-import uvicorn
 import asyncio
+from fastapi import FastAPI, Request
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
+# تنظیمات لاگ
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# FastAPI app برای Render health check
+# اپ FastAPI
 web_app = FastAPI()
 
-@web_app.get("/")
-async def root():
-    return {"status": "ok"}
+# متغیر سراسری برای اپلیکیشن تلگرام
+telegram_app: Application = None
 
-# /start command
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = await update.message.reply_text("سلام 👋 من یه ربات ساده هستم. هرچی بفرستی پاک می‌کنم 😅")
-    await asyncio.sleep(5)
+# ─────────── هندلرها ───────────
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = await update.message.reply_text("سلام! 👋\nهرچی بفرستی، همونو برمی‌گردونم 🤖")
+    await asyncio.sleep(5)  # بعد از ۵ ثانیه پاک کن
     try:
-        await msg.delete()
         await update.message.delete()
-    except:
-        pass
+        await msg.delete()
+    except Exception as e:
+        logger.warning(f"خطا در پاک‌کردن پیام: {e}")
 
-# echo handler + auto delete
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.text:
         msg = await update.message.reply_text(update.message.text)
         await asyncio.sleep(5)
         try:
-            await msg.delete()
             await update.message.delete()
-        except:
-            pass
+            await msg.delete()
+        except Exception as e:
+            logger.warning(f"خطا در پاک‌کردن پیام: {e}")
 
-async def main() -> None:
-    token = os.getenv("TELEGRAM_TOKEN")
-    if not token:
-        raise RuntimeError("❌ Env var TELEGRAM_TOKEN تنظیم نشده")
+# ─────────── FastAPI routes ───────────
+@web_app.get("/")
+async def root():
+    """برای UptimeRobot"""
+    return {"status": "ok"}
 
-    secret_path = os.getenv("WEBHOOK_SECRET", "super-secret-path")
-    public_url  = os.getenv("PUBLIC_URL")
-    if not public_url:
-        raise RuntimeError("❌ Env var PUBLIC_URL تنظیم نشده")
+@web_app.post("/{secret_path}")
+async def telegram_webhook(request: Request, secret_path: str):
+    """مسیر وب‌هوک تلگرام"""
+    if secret_path != os.getenv("WEBHOOK_SECRET", "secret"):
+        return {"error": "forbidden"}
 
-    port = int(os.getenv("PORT", "10000"))
+    data = await request.json()
+    update = Update.de_json(data, telegram_app.bot)
+    await telegram_app.update_queue.put(update)
+    return {"status": "ok"}
 
-    app = Application.builder().token(token).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+# ─────────── main ───────────
+async def main():
+    global telegram_app
 
-    # اجرای وبهوک
-    await app.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=secret_path,
-        webhook_url=f"{public_url}/{secret_path}",
-        drop_pending_updates=True,
-    )
+    TOKEN = os.getenv("TELEGRAM_TOKEN")
+    if not TOKEN:
+        raise RuntimeError("⚠️ متغیر محیطی TELEGRAM_TOKEN تنظیم نشده.")
 
+    PUBLIC_URL = os.getenv("PUBLIC_URL")
+    if not PUBLIC_URL:
+        raise RuntimeError("⚠️ متغیر محیطی PUBLIC_URL تنظیم نشده.")
+
+    SECRET_PATH = os.getenv("WEBHOOK_SECRET", "secret")
+
+    telegram_app = Application.builder().token(TOKEN).build()
+
+    # هندلرها
+    telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+
+    # ست‌کردن وب‌هوک
+    await telegram_app.bot.set_webhook(f"{PUBLIC_URL}/{SECRET_PATH}")
+
+# ─────────── اجرا ───────────
 if __name__ == "__main__":
-    nest_asyncio.apply()
+    import uvicorn
+
     loop = asyncio.get_event_loop()
     loop.create_task(main())
-    uvicorn.run(web_app, host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
+
+    port = int(os.getenv("PORT", "10000"))
+    uvicorn.run(web_app, host="0.0.0.0", port=port)
