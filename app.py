@@ -1,60 +1,47 @@
+
 import os
 import logging
-from fastapi import FastAPI, Request, HTTPException, Header
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from flask import Flask, request
+from telegram import Bot, Update
+from telegram.ext import Application, CommandHandler
 
-# ---- تنظیمات محیط ----
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
-PUBLIC_URL = os.getenv("PUBLIC_URL")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "mysecret")
+APP_URL = os.getenv("APP_URL")
+
+if not TELEGRAM_TOKEN or not APP_URL:
+    raise RuntimeError("Env vars TELEGRAM_TOKEN و APP_URL باید تنظیم شوند.")
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-# ---- ساخت اپلیکیشن FastAPI ----
-app = FastAPI()
+flask_app = Flask(__name__)
 
-# ---- ساخت ربات ----
-bot_app = Application.builder().token(TOKEN).build()
+bot = Bot(token=TELEGRAM_TOKEN)
+application = Application.builder().token(TELEGRAM_TOKEN).build()
 
-# دستور ساده /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام 👋 ربات آماده‌ست!")
+async def start(update, context):
+    await update.message.reply_text("سلام! من آماده‌ام ✅")
 
-bot_app.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("start", start))
 
+@flask_app.post(f"/webhook/{WEBHOOK_SECRET}")
+def webhook():
+    try:
+        data = request.get_json(force=True)
+        update = Update.de_json(data, bot)
+        application.update_queue.put_nowait(update)
+    except Exception as e:
+        logging.exception("❌ Webhook error:")
+        return "error", 500
+    return "ok"
 
-# ---- رویداد lifespan (جایگزین startup/shutdown) ----
-@app.on_event("lifespan")
-async def lifespan(app: FastAPI):
-    logger.info("🔹 Bot starting...")
-    await bot_app.initialize()
-    await bot_app.start()
-    await bot_app.bot.set_webhook(
-        url=f"{PUBLIC_URL}/webhook/{WEBHOOK_SECRET}"
-    )
-    yield
-    logger.info("🔹 Bot shutting down...")
-    await bot_app.stop()
-    await bot_app.shutdown()
+@flask_app.get("/ping")
+def ping():
+    return "ok"
 
-
-# ---- مسیر تست ----
-@app.get("/")
-async def root():
-    return {"status": "ok", "message": "Bot is live 🎉"}
-
-
-# ---- وبهوک ----
-@app.post("/webhook/{token}")
-async def webhook(request: Request, token: str, x_telegram_bot_api_secret_token: str = Header(None)):
-    if token != WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid token")
-    if x_telegram_bot_api_secret_token != WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid secret token")
-
-    data = await request.json()
-    update = Update.de_json(data, bot_app.bot)
-    await bot_app.process_update(update)
-    return {"ok": True}
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(application.initialize())
+    bot.set_webhook(f"{APP_URL}/webhook/{WEBHOOK_SECRET}")
+    logging.info(f"Bot started with webhook: {APP_URL}/webhook/{WEBHOOK_SECRET}")
+    asyncio.run(application.start())
