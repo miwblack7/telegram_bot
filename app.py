@@ -1,15 +1,14 @@
 import os
 import logging
-from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from quart import Quart, jsonify
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ---------------------
-# دستورات ربات
-# ---------------------
+# ------------------ ربات ------------------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("سلام! 👋 من یک بات ساده هستم.\nهرچی بفرستی، همونو برمی‌گردونم 🤖")
 
@@ -17,47 +16,45 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message and update.message.text:
         await update.message.reply_text(update.message.text)
 
-# ---------------------
-# Flask App
-# ---------------------
-flask_app = Flask(__name__)
+# ------------------ سرور / Ping ------------------
 
-# health check برای UptimeRobot
-@flask_app.route("/ping")
-def ping():
-    return "pong 🏓", 200
+app_server = Quart(__name__)
 
-async def setup_bot():
+@app_server.route("/ping")
+async def ping():
+    return jsonify({"status": "ok"}), 200
+
+# ------------------ Main ------------------
+
+async def main():
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
         raise RuntimeError("Env var TELEGRAM_TOKEN تنظیم نشده است.")
 
     secret_path = os.getenv("WEBHOOK_SECRET", "super-secret-path")
-    public_url  = os.getenv("PUBLIC_URL")
+    public_url = os.getenv("PUBLIC_URL")
     if not public_url:
         raise RuntimeError("Env var PUBLIC_URL تنظیم نشده است.")
 
-    app = Application.builder().token(token).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+    port = int(os.getenv("PORT", "8000"))
 
-    # اتصال webhook
-    await app.bot.set_webhook(f"{public_url}/{secret_path}")
+    bot_app = Application.builder().token(token).build()
+    bot_app.add_handler(CommandHandler("start", start))
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    # route برای تلگرام
-    @flask_app.post(f"/{secret_path}")
-    def webhook():
-        update = Update.de_json(request.get_json(force=True), app.bot)
-        app.update_queue.put_nowait(update)
-        return "ok", 200
+    # اجرای وبهوک تلگرام
+    await bot_app.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=secret_path,
+        webhook_url=f"{public_url}/{secret_path}",
+        drop_pending_updates=True,
+    )
 
-    return app
-
-# ---------------------
-# اجرای برنامه
-# ---------------------
 if __name__ == "__main__":
     import asyncio
-    application = asyncio.run(setup_bot())
-    port = int(os.getenv("PORT", "8000"))
-    flask_app.run(host="0.0.0.0", port=port)
+
+    # اجرای همزمان سرور Quart و ربات تلگرام
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    loop.run_until_complete(app_server.run_task(host="0.0.0.0", port=int(os.getenv("PORT", 8000))))
