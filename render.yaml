@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: telegram-echo-bot
+    name: telegram-bot
     env: python
     plan: free
     region: frankfurt
