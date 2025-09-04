@@ -5,7 +5,7 @@ from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # ---------------- Config ----------------
-TOKEN = os.getenv("BOT_TOKEN", "توکن_اینجا")
+TOKEN = os.getenv("BOT_TOKEN", "8344618608:AAEZzCZ3I96lp_Xipm7c03TJrwLRiZlQAG4")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "hhhh55")
 APP_URL = os.getenv("APP_URL", "https://telegram-bot-mocw.onrender.com")
 
