@@ -1,2 +1,2 @@
-python-telegram-bot==21.11.1
-flask==3.0.3
+quart==0.18.3
+python-telegram-bot==20.5
