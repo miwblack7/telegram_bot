@@ -1,7 +1,15 @@
 services:
   - type: web
-    name: telegram-bot
+    name: telegram-echo-bot
     env: python
     plan: free
+    region: frankfurt
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    startCommand: python app.py
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false   # مقدار را بعداً در داشبورد Render می‌گذارید
+      - key: PUBLIC_URL
+        sync: false   # بعد از اولین دیپلوی، URL پابلیک را ست کنید
+      - key: WEBHOOK_SECRET
+        sync: false   # هر رشته امنی که دوست دارید
