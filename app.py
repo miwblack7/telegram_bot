@@ -1,45 +1,47 @@
 import os
 import logging
-from fastapi import FastAPI, Request
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, ContextTypes
-
-# ---------------- Config ----------------
-TOKEN = os.getenv("BOT_TOKEN", "8344618608:AAEZzCZ3I96lp_Xipm7c03TJrwLRiZlQAG4")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "hhhh55")
-APP_URL = os.getenv("APP_URL", "https://telegram-bot-mocw.onrender.com")
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app = FastAPI()
-bot = Bot(token=TOKEN)
-application = Application.builder().token(TOKEN).build()
+# /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("سلام! من یک بات ساده‌ام 🤖\nچیزی بنویس تا همونو برات تکرار کنم.")
 
-# ---------------- Handlers ----------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! 🌹 ربات با موفقیت کار می‌کنه.")
+# echo همه پیام‌های متنی
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message and update.message.text:
+        await update.message.reply_text(update.message.text)
 
-application.add_handler(CommandHandler("start", start))
+async def main() -> None:
+    token = os.getenv("TELEGRAM_TOKEN")
+    if not token:
+        raise RuntimeError("Env var TELEGRAM_TOKEN تنظیم نشده است.")
 
-# ---------------- FastAPI Routes ----------------
-@app.post(f"/webhook/{WEBHOOK_SECRET}")
-async def webhook(request: Request):
-    data = await request.json()
-    update = Update.de_json(data, bot)
-    await application.process_update(update)
-    return {"ok": True}
+    # یک مسیر محرمانه برای وبهوک بسازید (مثلاً با مقدار محیطی یا پیش‌فرض)
+    secret_path = os.getenv("WEBHOOK_SECRET", "super-secret-path")
+    public_url   = os.getenv("PUBLIC_URL")  # آدرس پابلیک سرویس روی Render
+    if not public_url:
+        raise RuntimeError("Env var PUBLIC_URL تنظیم نشده است (مثلاً https://your-app.onrender.com).")
 
-@app.get("/")
-async def home():
-    return {"message": "Bot is running ✅"}
+    port = int(os.getenv("PORT", "8000"))  # Render خودش PORT را ست می‌کند
 
-# ---------------- Startup & Shutdown ----------------
-@app.on_event("startup")
-async def on_startup():
-    await bot.set_webhook(f"{APP_URL}/webhook/{WEBHOOK_SECRET}")
-    logging.info(f"✅ Webhook set: {APP_URL}/webhook/{WEBHOOK_SECRET}")
+    app = Application.builder().token(token).build()
 
-@app.on_event("shutdown")
-async def on_shutdown():
-    await bot.delete_webhook()
-    logging.info("❌ Webhook removed")
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+
+    # اجرای وبهوک (خودش وبهوک تلگرام را ست می‌کند اگر webhook_url بدهید)
+    await app.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=secret_path,
+        webhook_url=f"{public_url}/{secret_path}",
+        drop_pending_updates=True,
+    )
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
