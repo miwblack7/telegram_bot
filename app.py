@@ -1,60 +1,71 @@
 import os
-import logging
-from quart import Quart, jsonify, request
+from flask import Flask, request, jsonify
 from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import asyncio
+import threading
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# -------------------------
+# تنظیمات ربات
+# -------------------------
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+if not TOKEN:
+    raise RuntimeError("Env var TELEGRAM_TOKEN تنظیم نشده است.")
 
-# ----------------- BOT HANDLERS -----------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("سلام! 👋 من یک بات ساده هستم.\nهرچی بفرستی، همونو برمی‌گردونم 🤖")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super-secret-path")
+PUBLIC_URL = os.getenv("PUBLIC_URL")
+if not PUBLIC_URL:
+    raise RuntimeError("Env var PUBLIC_URL تنظیم نشده است.")
 
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+PORT = int(os.getenv("PORT", 8000))
+
+# -------------------------
+# Flask App
+# -------------------------
+app = Flask(__name__)
+
+# -------------------------
+# Handlers تلگرام
+# -------------------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("سلام! 👋 من یک بات ساده هستم. هرچی بفرستی، همونو برمی‌گردونم 🤖")
+
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.text:
         await update.message.reply_text(update.message.text)
 
-# ----------------- MAIN APP -----------------
-app = Quart(__name__)
-
-@app.route("/ping")
-async def ping():
-    return jsonify({"status": "ok"})
-
-@app.route("/webhook/<secret>", methods=["POST"])
-async def webhook(secret):
-    expected_secret = os.getenv("WEBHOOK_SECRET", "super-secret-path")
-    if secret != expected_secret:
-        return jsonify({"error": "unauthorized"}), 403
-
-    data = await request.get_json()
-    update = Update.de_json(data, bot)
-    await application.update_queue.put(update)
-    return jsonify({"status": "ok"})
-
-# ----------------- TELEGRAM SETUP -----------------
-token = os.getenv("TELEGRAM_TOKEN")
-if not token:
-    raise RuntimeError("Env var TELEGRAM_TOKEN تنظیم نشده است.")
-
-bot = Bot(token)
-application = Application.builder().token(token).build()
+# -------------------------
+# ایجاد Application
+# -------------------------
+application = ApplicationBuilder().token(TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-# ----------------- RUN WEBHOOK -----------------
-async def main():
-    public_url = os.getenv("PUBLIC_URL")
-    secret_path = os.getenv("WEBHOOK_SECRET", "super-secret-path")
-    port = int(os.getenv("PORT", "8000"))
+# -------------------------
+# وبهوک Flask
+# -------------------------
+@app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
+def webhook():
+    """مسیر وبهوک تلگرام"""
+    update = Update.de_json(request.get_json(force=True), Bot(TOKEN))
+    asyncio.run(application.update_queue.put(update))  # قرار دادن آپدیت در صف
+    return "OK", 200
 
-    # ست کردن وبهوک
-    await bot.set_webhook(f"{public_url}/webhook/{secret_path}")
+@app.route("/ping", methods=["GET"])
+def ping():
+    """مسیر Ping برای UptimeRobot"""
+    return jsonify({"status": "alive"}), 200
 
-    # اجرای اپ Quart
-    await app.run_task(host="0.0.0.0", port=port)
+# -------------------------
+# اجرای ربات در یک Thread جداگانه
+# -------------------------
+def run_asyncio_loop():
+    asyncio.run(application.initialize())
+    asyncio.run(application.start())
+    asyncio.run(application.idle())
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    # اجرای async loop در thread جدا
+    threading.Thread(target=run_asyncio_loop, daemon=True).start()
+    # اجرای Flask
+    app.run(host="0.0.0.0", port=PORT)
