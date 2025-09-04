@@ -1,47 +1,45 @@
-
 import os
 import logging
-from flask import Flask, request
-from telegram import Bot, Update
-from telegram.ext import Application, CommandHandler
+from fastapi import FastAPI, Request
+from telegram import Update, Bot
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "mysecret")
-APP_URL = os.getenv("PUBLIC_URL")
-
-if not TELEGRAM_TOKEN or not APP_URL:
-    raise RuntimeError("Env vars TELEGRAM_TOKEN و APP_URL باید تنظیم شوند.")
+# ---------------- Config ----------------
+TOKEN = os.getenv("BOT_TOKEN", "8344618608:AAEZzCZ3I96lp_Xipm7c03TJrwLRiZlQAG4")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "hhhh55")
+APP_URL = os.getenv("APP_URL", "https://telegram-bot-mocw.onrender.com")
 
 logging.basicConfig(level=logging.INFO)
 
-flask_app = Flask(__name__)
+app = FastAPI()
+bot = Bot(token=TOKEN)
+application = Application.builder().token(TOKEN).build()
 
-bot = Bot(token=TELEGRAM_TOKEN)
-application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-async def start(update, context):
-    await update.message.reply_text("سلام! من آماده‌ام ✅")
+# ---------------- Handlers ----------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("سلام! 🌹 ربات با موفقیت کار می‌کنه.")
 
 application.add_handler(CommandHandler("start", start))
 
-@flask_app.post(f"/webhook/{WEBHOOK_SECRET}")
-def webhook():
-    try:
-        data = request.get_json(force=True)
-        update = Update.de_json(data, bot)
-        application.update_queue.put_nowait(update)
-    except Exception as e:
-        logging.exception("❌ Webhook error:")
-        return "error", 500
-    return "ok"
+# ---------------- FastAPI Routes ----------------
+@app.post(f"/webhook/{WEBHOOK_SECRET}")
+async def webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, bot)
+    await application.process_update(update)
+    return {"ok": True}
 
-@flask_app.get("/ping")
-def ping():
-    return "ok"
+@app.get("/")
+async def home():
+    return {"message": "Bot is running ✅"}
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(application.initialize())
-    bot.set_webhook(f"{APP_URL}/webhook/{WEBHOOK_SECRET}")
-    logging.info(f"Bot started with webhook: {APP_URL}/webhook/{WEBHOOK_SECRET}")
-    asyncio.run(application.start())
+# ---------------- Startup & Shutdown ----------------
+@app.on_event("startup")
+async def on_startup():
+    await bot.set_webhook(f"{APP_URL}/webhook/{WEBHOOK_SECRET}")
+    logging.info(f"✅ Webhook set: {APP_URL}/webhook/{WEBHOOK_SECRET}")
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await bot.delete_webhook()
+    logging.info("❌ Webhook removed")
