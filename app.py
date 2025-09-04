@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "mysecret")
-APP_URL = os.getenv("APP_URL")
+APP_URL = os.getenv("PUBLIC_URL")
 
 if not TELEGRAM_TOKEN or not APP_URL:
     raise RuntimeError("Env vars TELEGRAM_TOKEN و APP_URL باید تنظیم شوند.")
